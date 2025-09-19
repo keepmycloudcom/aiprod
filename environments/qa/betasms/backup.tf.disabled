@@ -1,0 +1,114 @@
+module "task-backup" {
+  source      = "git::https://github.com/keepmycloudcom/modules-ecs.git//task?ref=v1.0.0"
+  aws_region  = var.aws_region
+  project_env = var.project_env
+  cloudwatch_log_group_name = "/${var.project_env}/${var.project_name}/backup"
+  basename                  = local.basename
+  name                      = "backup"
+  task_container_image      = "jareware/docker-volume-backup:latest"
+  container_name            = "backup"
+  task_definition_cpu       = 128
+  task_definition_memory    = 256
+
+  docker_labels             = {
+    "SERVICE_NAME" = "backup"
+  }
+  task_environment   = [
+  {
+    name      = "AWS_S3_BUCKET_NAME"
+    value     = lower("${var.project_env}-backups-${var.aws_region}-${var.project_domain}")
+  }]
+  volume = {
+        docker = {
+          name = "docker-socket"
+          host_path = "/var/run/docker.sock"
+        },
+        letsencrypt = {
+          name = "letsencrypt"
+          docker_volume_configuration = [{
+            scope = "shared"
+            autoprovision = false
+            driver = "local"
+          }]
+        },
+        scylla-db-0 = {
+          name = "scylla-db-0"
+          docker_volume_configuration = [{
+            scope = "shared"
+            autoprovision = false
+            driver = "local"
+          }]
+        },
+        scylla-db-1 = {
+          name = "scylla-db-1"
+          docker_volume_configuration = [{
+            scope = "shared"
+            autoprovision = false
+            driver = "local"
+          }]
+        },
+        scylla-db-2 = {
+          name = "scylla-db-2"
+          docker_volume_configuration = [{
+            scope = "shared"
+            autoprovision = false
+            driver = "local"
+          }]
+      }
+  }
+  task_mount_points       = [
+  {  
+    containerPath = "/var/run/docker.sock"
+    sourceVolume  = "docker-socket"
+    readOnly      = false
+  },
+  {
+    containerPath = "/backup/letsencrypt"
+    readOnly      = false
+    sourceVolume  = "letsencrypt"
+  },
+  {  
+    containerPath = "/backup/scylla-db-0"
+    readOnly      = false
+    sourceVolume  = "scylla-db-0"
+  },
+  {  
+    containerPath = "/backup/scylla-db-1"
+    readOnly      = false
+    sourceVolume  = "scylla-db-1"
+  },
+  {  
+    containerPath = "/backup/scylla-db-2"
+    readOnly      = false
+    sourceVolume  = "scylla-db-2"
+  }
+  ]
+  network_mode    = "bridge"
+
+  tags                      = local.base_tags
+}
+
+# Service
+module "service-backup" {
+  source      = "git::https://github.com/keepmycloudcom/modules-ecs.git//service?ref=v1.0.0"
+  aws_region  = var.aws_region
+  project_env = var.project_env
+
+  name                    = "backup"
+  ecs_cluster             = module.ecs.id
+  container_name          = "backup"
+  scheduling_strategy     = "DAEMON"
+
+  ecs_task_definition     = module.task-backup.arn
+
+  tags                    = local.base_tags
+}
+
+# CloudWatch Log Group
+resource "aws_cloudwatch_log_group" "backup-loggroup" {
+  name              = "/${var.project_env}/${var.project_name}/backup"
+  retention_in_days = "3"
+  tags              = merge(local.base_tags, {
+    Name            = "/${var.project_env}/${var.project_name}/backup"
+  })
+}
